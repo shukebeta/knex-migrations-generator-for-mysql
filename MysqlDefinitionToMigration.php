@@ -4,6 +4,7 @@
 class MysqlDefinitionToMigration
 {
     private $table;
+    private $start = '    table';
 
     private $dict = [
         'varchar' => 'string',
@@ -19,8 +20,8 @@ class MysqlDefinitionToMigration
         $table = [
             'name' => $match[1],
             'engine' => $match[2],
-            'default_charset' => $match[3],
-            'collate' => $match[4]
+            'default_charset' => isset($match[3]) ? $match[3] : '',
+            'collate' => isset($match[4]) ? $match[4] : '',
         ];
 
         $fieldsPattern = '/\s+`([\w\d_]+)`\ (\w+)(?:\((\d+)\))?(?: (unsigned))?'
@@ -95,7 +96,7 @@ class MysqlDefinitionToMigration
     private function getFieldsContent() {
         $fields = [];
         foreach($this->table['fields'] as $_f) {
-            $_snippets = ['table'];
+            $_snippets = [$this->start];
             switch ($_f['type']) {
                 case 'tinyint':
                 case 'char':
@@ -135,22 +136,23 @@ class MysqlDefinitionToMigration
         $collate = $this->table['collate'] ? $this->table['collate'] : 'utf8mb4_unicode_ci';
 
         $meta = [];
-        $meta[] = 'table.engine(\'' . $this->table['engine'] . '\')';
-        $meta[] = 'table.charset(\'' . $charset . '\')';
-        $meta[] = 'table.collate(\'' . $collate . '\')';
+        $meta[] = "{$this->start}.engine('{$this->table['engine']}')";
+        $meta[] = "{$this->start}.charset('{$charset}')";
+        $meta[] = "{$this->start}.collate('{$collate}')";
 
-        if (isset($this->table['increments'])) {
-            $meta[] = 'table.increments(\'' . $this->table['increments'] . '\').primary()';
-        }
         return join("\n", $meta);
     }
 
     private function getKeysContent() {
         $keys = [];
         foreach ($this->table['keys'] as $_key) {
-            $_snippets = ['table'];
+            $_snippets = [$this->start];
             $_snippets[] = $_key['key_type'] . '(' . $this->_getFields($_key['fields']) . ($_key['key_name'] ? ", '" . $_key['key_name'] . "'" : '') . ')';
             $keys[] = join('.', $_snippets);
+        }
+
+        if (isset($this->table['increments'])) {
+            $keys[] = "{$this->start}.increments('{$this->table['increments']}')";
         }
         return join("\n", $keys);
     }
@@ -167,14 +169,55 @@ class MysqlDefinitionToMigration
         return $type;
     }
 
+    private function getPrefix() {
+        return <<<code
+//I only want migrations, rollbacks, and seeds to run when the NODE_ENV is specified
+//in the knex seed/migrate command. Knex will error out if it is not specified.
+if (!process.env.NODE_ENV) {
+  throw new Error('NODE_ENV not set')
+}
+
+exports.up = function(knex, Promise) {
+  return knex.schema.createTable('{$this->table['name']}', function(table) {
+
+code;
+    }
+
+    private function getSuffix() {
+        return <<<code
+  })
+}
+
+exports.down = function(knex, Promise) {
+  //We never want to drop tables in production
+  if (process.env.NODE_ENV !== 'production') { 
+    return knex.schema.dropTableIfExists('users')
+  }
+}
+
+code;
+
+    }
+
     public function write2file() {
-        $filename = $this->getMigrationFileName();
-        file_put_contents(
-            $filename,
-            $this->getMetaContent() . "\n" .
-            $this->getFieldsContent() . "\n" .
-            $this->getKeysContent()
-        );
+        $dir = './migrations';
+        if (!is_dir($dir)) {
+            mkdir($dir);
+        }
+
+        $filename = $dir . '/' . $this->getMigrationFileName();
+        if (is_dir($dir)) {
+            file_put_contents(
+                $filename,
+                $this->getPrefix() .
+                $this->getMetaContent() . "\n\n" .
+                $this->getFieldsContent() . "\n\n" .
+                $this->getKeysContent() . "\n" .
+                $this->getSuffix()
+            );
+        } else {
+            echo $dir . ' not exist!';
+        }
     }
 
 }
