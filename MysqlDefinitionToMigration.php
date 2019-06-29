@@ -191,7 +191,7 @@ code;
 exports.down = function(knex, Promise) {
   //We never want to drop tables in production
   if (process.env.NODE_ENV !== 'production') { 
-    return knex.schema.dropTableIfExists('users')
+    return knex.schema.dropTableIfExists('{$this->table['name']}')
   }
 }
 

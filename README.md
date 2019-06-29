@@ -2,7 +2,7 @@
 
 This is a command line tool to automatic generate knex migration files from database exported structure file.
 
-## 1. get a sql file from your running database
+## 1. Get a sql file from your running database
 
 you run
 
