@@ -1,5 +1,5 @@
 <?php
-require_once './MysqlDefinitionToMigration.php';
+require_once __DIR__ . '/MysqlDefinitionToMigration.php';
 
 for ($i = 1; $i < sizeof($_SERVER['argv']); $i++) {
     $sqlFile = $_SERVER['argv'][$i];
