@@ -32,9 +32,18 @@ class MysqlDefinitionToMigration
 
         preg_match_all($fieldsPattern, $definition, $matches);
 
-        $fields = [];
-        for ($i = 0; $i < sizeof($matches[0]); $i++) {
-            $fields[$i] = [
+        for ($i = 0, $j = 0; $i < sizeof($matches[0]); $i++) {
+            // process increments fields
+            if (!!$matches[6][$i]) {
+                $field = $matches[2][$i] == 'bigint' ? 'bigIncrements' : 'increments';
+                $table['increments'] = [
+                    'increment_type' => $field,
+                    'field_name' => $matches[1][$i]
+                ];
+                continue;
+            }
+
+            $_field = [
                 'name' => $matches[1][$i],
                 'type' => $matches[2][$i],
                 'length' => $matches[3][$i],
@@ -42,31 +51,28 @@ class MysqlDefinitionToMigration
                 'comment' => $matches[7][$i]
             ];
 
-            // process increments fields
-            if (!!$matches[6][$i]) {
-                $table['increments'] = $fields[$i]['name'];
-            }
-
             $valAttribute = $matches[5][$i];
             // ['nullable', 'defaultTo'] is optional
             if ($valAttribute == 'DEFAULT NULL') {
-                $fields[$i]['nullable'] = 1;
+                $_field['nullable'] = 1;
             } else if (substr($valAttribute, 0, 8) == 'DEFAULT ') {
-                $fields[$i]['nullable'] = 0;
+                $_field['nullable'] = 0;
                 $v = substr($valAttribute, 8);
                 if ($v == 'NULL ON UPDATE CURRENT_TIMESTAMP') {
-                    $fields[$i]['default'] = "knex.raw('NULL ON UPDATE CURRENT_TIMESTAMP')";
+                    $_field['default'] = "knex.raw('NULL ON UPDATE CURRENT_TIMESTAMP')";
                 } else if ($v == 'CURRENT_TIMESTAMP') {
-                    $fields[$i]['default'] = "knex.raw('CURRENT_TIMESTAMP')";
+                    $_field['default'] = "knex.raw('CURRENT_TIMESTAMP')";
                 }
             } else if ($valAttribute == 'NOT NULL') {
-                $fields[$i]['nullable'] = 0;
+                $_field['nullable'] = 0;
             } else if ($valAttribute == 'NOT NULL DEFAULT CURRENT_TIMESTAMP') {
-                $fields[$i]['nullable'] = 0;
-                $fields[$i]['defaultTo'] = "knex.raw('CURRENT_TIMESTAMP')";
+                $_field['nullable'] = 0;
+                $_field['defaultTo'] = "knex.raw('CURRENT_TIMESTAMP')";
             }
+
+            $table['fields'][$j] = $_field;
+            $j++;
         }
-        $table['fields'] = $fields;
 
         /**
          *   PRIMARY KEY (`id`),
@@ -78,6 +84,9 @@ class MysqlDefinitionToMigration
 
         $keys = [];
         for ($i = 0; $i < sizeof($matches[0]); $i++) {
+            if ($matches[1][$i] == 'PRIMARY' && isset($table['increments'])) {
+                continue;
+            }
             $keys[] = [
                 'fields' => str_replace('`', '', $matches[3][$i]),
                 'key_type' =>  $matches[1][$i] == '' ? 'index' : strtolower($matches[1][$i]),
@@ -126,14 +135,23 @@ class MysqlDefinitionToMigration
             if(isset($_f['defaultTo'])) {
                 $_snippets[] = 'defaultTo(' . $_f['defaultTo'] . ')';
             }
+
+            if($_f['comment']) {
+                $_snippets[] = "comment('{$_f['comment']}')";
+            }
             $fields[] = join('.', $_snippets);
         }
         return join("\n", $fields);
     }
 
     private function getMetaContent() {
-        $charset = $this->table['default_charset'] ? $this->table['default_charset'] : 'utf8mb4';
-        $collate = $this->table['collate'] ? $this->table['collate'] : 'utf8mb4_unicode_ci';
+        if (isset($this->table['default_charset'], $this->table['collate']) && $this->table['default_charset'] && $this->table['collate']) {
+            $charset = $this->table['default_charset'];
+            $collate = $this->table['collate'];
+        } else {
+            $charset = 'utf8mb4';
+            $collate = 'utf8mb4_unicode_ci';
+        }
 
         $meta = [];
         $meta[] = "{$this->start}.engine('{$this->table['engine']}')";
@@ -152,7 +170,7 @@ class MysqlDefinitionToMigration
         }
 
         if (isset($this->table['increments'])) {
-            $keys[] = "{$this->start}.increments('{$this->table['increments']}')";
+            $keys[] = "{$this->start}.{$this->table['increments']['increment_type']}('{$this->table['increments']['field_name']}')";
         }
         return join("\n", $keys);
     }
